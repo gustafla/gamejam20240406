@@ -61,9 +61,11 @@ async fn create_player(
     // Create secret and register
     let registration = Registration {
         player: player.clone(),
-        secret: rand::thread_rng().gen(),
+        secret: rand::thread_rng().gen::<u64>().to_string(),
     };
-    state.secrets.insert(player.name, registration.secret);
+    state
+        .secrets
+        .insert(player.name, registration.secret.clone());
 
     // this will be converted into a JSON response
     // with a status code of `201 Created`
@@ -95,7 +97,7 @@ async fn update_player(
     Path(name): Path<String>,
     State(state): State<SharedState>,
     Json(payload): Json<PlayerUpdate>,
-) -> Result<Json<Player>, StatusCode> {
+) -> Result<Json<Vec<Player>>, StatusCode> {
     let state = &mut state.write().unwrap();
 
     if let Some(secret) = state.secrets.get(&name) {
@@ -106,10 +108,17 @@ async fn update_player(
 
     if let Some(player) = state.players.get_mut(&name) {
         player.position = payload.position;
-        Ok(Json(player.clone()))
     } else {
-        Err(StatusCode::NOT_FOUND)
+        return Err(StatusCode::NOT_FOUND);
     }
+
+    Ok(Json(
+        state
+            .players
+            .values()
+            .map(|player| player.clone())
+            .collect(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -132,13 +141,13 @@ struct Player {
 #[derive(Serialize, Clone)]
 struct Registration {
     player: Player,
-    secret: u64,
+    secret: String,
 }
 
 #[derive(Deserialize, Clone)]
 struct PlayerUpdate {
     position: Position,
-    secret: u64,
+    secret: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -151,5 +160,5 @@ type SharedState = Arc<RwLock<GameState>>;
 #[derive(Default)]
 struct GameState {
     players: HashMap<String, Player>,
-    secrets: HashMap<String, u64>,
+    secrets: HashMap<String, String>,
 }
