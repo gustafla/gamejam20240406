@@ -39,10 +39,10 @@ async fn main() {
 async fn create_player(
     State(state): State<SharedState>,
     Json(payload): Json<CreatePlayer>,
-) -> (StatusCode, Result<Json<Player>, Json<Error>>) {
-    let players = &mut state.write().unwrap().players;
+) -> (StatusCode, Result<Json<Registration>, Json<Error>>) {
+    let state = &mut state.write().unwrap();
 
-    if players.contains_key(&payload.name) {
+    if state.players.contains_key(&payload.name) {
         return (
             StatusCode::FORBIDDEN,
             Err(Json(Error {
@@ -51,17 +51,23 @@ async fn create_player(
         );
     }
 
-    // insert your application logic here
+    // Create player
     let player = Player {
         name: payload.name,
         position: Default::default(),
     };
+    state.players.insert(player.name.clone(), player.clone());
 
-    players.insert(player.name.clone(), player.clone());
+    // Create secret and register
+    let registration = Registration {
+        player: player.clone(),
+        secret: rand::thread_rng().gen(),
+    };
+    state.secrets.insert(player.name, registration.secret);
 
     // this will be converted into a JSON response
     // with a status code of `201 Created`
-    (StatusCode::CREATED, Ok(Json(player)))
+    (StatusCode::CREATED, Ok(Json(registration)))
 }
 
 async fn get_players(State(state): State<SharedState>) -> Result<Json<Vec<Player>>, StatusCode> {
@@ -88,12 +94,18 @@ async fn get_player(
 async fn update_player(
     Path(name): Path<String>,
     State(state): State<SharedState>,
-    Json(payload): Json<Position>,
+    Json(payload): Json<PlayerUpdate>,
 ) -> Result<Json<Player>, StatusCode> {
-    let players = &mut state.write().unwrap().players;
+    let state = &mut state.write().unwrap();
 
-    if let Some(player) = players.get_mut(&name) {
-        player.position = payload;
+    if let Some(secret) = state.secrets.get(&name) {
+        if *secret != payload.secret {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    if let Some(player) = state.players.get_mut(&name) {
+        player.position = payload.position;
         Ok(Json(player.clone()))
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -118,6 +130,18 @@ struct Player {
 }
 
 #[derive(Serialize, Clone)]
+struct Registration {
+    player: Player,
+    secret: u64,
+}
+
+#[derive(Deserialize, Clone)]
+struct PlayerUpdate {
+    position: Position,
+    secret: u64,
+}
+
+#[derive(Serialize, Clone)]
 struct Error {
     error: String,
 }
@@ -127,4 +151,5 @@ type SharedState = Arc<RwLock<GameState>>;
 #[derive(Default)]
 struct GameState {
     players: HashMap<String, Player>,
+    secrets: HashMap<String, u64>,
 }
