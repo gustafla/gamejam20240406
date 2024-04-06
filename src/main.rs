@@ -7,7 +7,7 @@ use axum::{
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, RwLock},
 };
 use tower_http::services::ServeDir;
@@ -27,8 +27,8 @@ async fn main() {
         // players
         .route("/players", post(create_player))
         .route("/players", get(get_players))
-        .route("/players/:id", get(get_player))
-        .route("/players/:id", patch(update_player))
+        .route("/players/:name", get(get_player))
+        .route("/players/:name", patch(update_player))
         .with_state(Arc::clone(&shared_state));
 
     // listen globally on port 8000
@@ -40,9 +40,9 @@ async fn create_player(
     State(state): State<SharedState>,
     Json(payload): Json<CreatePlayer>,
 ) -> (StatusCode, Result<Json<Player>, Json<Error>>) {
-    let state = &mut state.write().unwrap();
+    let players = &mut state.write().unwrap().players;
 
-    if state.names.contains(&payload.name) {
+    if players.contains_key(&payload.name) {
         return (
             StatusCode::FORBIDDEN,
             Err(Json(Error {
@@ -53,13 +53,11 @@ async fn create_player(
 
     // insert your application logic here
     let player = Player {
-        id: rand::thread_rng().gen(),
         name: payload.name,
         position: Default::default(),
     };
 
-    state.players.insert(player.id, player.clone());
-    state.names.insert(player.name.clone());
+    players.insert(player.name.clone(), player.clone());
 
     // this will be converted into a JSON response
     // with a status code of `201 Created`
@@ -75,12 +73,12 @@ async fn get_players(State(state): State<SharedState>) -> Result<Json<Vec<Player
 }
 
 async fn get_player(
-    Path(id): Path<u64>,
+    Path(name): Path<String>,
     State(state): State<SharedState>,
 ) -> Result<Json<Player>, StatusCode> {
     let players = &state.read().unwrap().players;
 
-    if let Some(player) = players.get(&id) {
+    if let Some(player) = players.get(&name) {
         Ok(Json(player.clone()))
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -88,13 +86,13 @@ async fn get_player(
 }
 
 async fn update_player(
-    Path(id): Path<u64>,
+    Path(name): Path<String>,
     State(state): State<SharedState>,
     Json(payload): Json<Position>,
 ) -> Result<Json<Player>, StatusCode> {
     let players = &mut state.write().unwrap().players;
 
-    if let Some(player) = players.get_mut(&id) {
+    if let Some(player) = players.get_mut(&name) {
         player.position = payload;
         Ok(Json(player.clone()))
     } else {
@@ -115,7 +113,6 @@ struct Position {
 
 #[derive(Serialize, Clone)]
 struct Player {
-    id: u64,
     name: String,
     position: Position,
 }
@@ -129,6 +126,5 @@ type SharedState = Arc<RwLock<GameState>>;
 
 #[derive(Default)]
 struct GameState {
-    players: HashMap<u64, Player>,
-    names: HashSet<String>,
+    players: HashMap<String, Player>,
 }
